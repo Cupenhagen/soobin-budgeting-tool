@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppShell } from './AppShell'
 import { useAppStore } from '@/store/app-store'
-import { seedIfEmpty, restoreFromCloud, getCloudAccountCount } from '@/core/database/seed'
+import { seedIfEmpty, restoreFromCloud } from '@/core/database/seed'
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
   const { theme, onboardingDone, userName, setOnboardingDone } = useAppStore()
@@ -34,53 +34,44 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
       .catch(console.error)
   }, [onboardingDone, userName])
 
-  // When onboarding not done locally: check cloud first before redirecting.
-  // A returning user on a new device will have cloud data but empty localStorage.
+  // When onboarding not done locally: check Clerk publicMetadata (cross-device source of truth)
   useEffect(() => {
     if (onboardingDone) {
       setCloudChecked(true)
       return
     }
 
-    // Skip check on the onboarding page itself
     if (typeof window !== 'undefined' && window.location.pathname === '/onboarding') {
       setCloudChecked(true)
       return
     }
 
-    getCloudAccountCount().then((count) => {
-      if (count > 0) {
-        // Returning user on a new device — mark done immediately so we never
-        // redirect to onboarding, then restore cloud data in the background.
-        setOnboardingDone(true)
-        setCloudChecked(true)
-        restoreFromCloud()
-          .then(() => seedIfEmpty(userName))
-          .catch((e) => console.warn('[AppProviders] cloud restore failed (will retry on next load):', e))
-        // Navigation is handled by the onboardingDone useEffect above
-      } else if (count === 0) {
-        // Definitively no cloud data — brand new user
-        setCloudChecked(true)
-        if (window.location.pathname !== '/onboarding') {
+    fetch('/api/user/status')
+      .then((r) => r.json())
+      .then(({ onboarding_done }: { onboarding_done: boolean }) => {
+        if (onboarding_done) {
+          // Returning user on new device — mark done, restore in background
+          setOnboardingDone(true)
+          setCloudChecked(true)
+          restoreFromCloud()
+            .then(() => seedIfEmpty(userName))
+            .catch((e) => console.warn('[AppProviders] cloud restore failed:', e))
+          // onboardingDone state change will re-render AppShell; stay on current route
+        } else {
+          // New user — go to onboarding
+          setCloudChecked(true)
           router.replace('/onboarding')
         }
-      } else {
-        // count === -1: fetch failed (network/auth error) — don't redirect to onboarding,
-        // just show onboarding UI and let user decide
+      })
+      .catch(() => {
+        // API failed — default to onboarding (safe for new users)
         setCloudChecked(true)
-        if (window.location.pathname !== '/onboarding') {
-          router.replace('/onboarding')
-        }
-      }
-    }).catch(() => {
-      // Unexpected error — fall back to onboarding
-      setCloudChecked(true)
-      router.replace('/onboarding')
-    })
+        router.replace('/onboarding')
+      })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboardingDone])
 
-  // Show nothing while we're checking cloud (prevents flashing onboarding)
+  // Show nothing while checking (prevents flash of onboarding for returning users)
   if (!onboardingDone && !cloudChecked) return null
 
   if (!onboardingDone) return <>{children}</>

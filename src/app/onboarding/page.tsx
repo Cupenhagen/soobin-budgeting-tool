@@ -53,6 +53,8 @@ export default function OnboardingPage() {
       await db.accounts.bulkAdd(accounts)
       syncUpsert('accounts', accounts)
       setOnboardingDone(true)
+      // Persist onboarding completion in Clerk publicMetadata so new-device logins skip onboarding
+      fetch('/api/user/status', { method: 'POST' }).catch(() => {})
       router.replace('/dashboard')
     } catch (err) {
       console.error('[onboarding] handleFinish error:', err)
