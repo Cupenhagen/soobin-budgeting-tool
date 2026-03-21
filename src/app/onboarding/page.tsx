@@ -5,6 +5,7 @@ import { useAppStore } from '@/store/app-store'
 import { seedIfEmpty } from '@/core/database/seed'
 import { db } from '@/core/database/db'
 import { newAccount } from '@/core/models/account'
+import { syncUpsert } from '@/lib/cloud-sync'
 import { APP_NAME, BOT_NAME } from '@/lib/constants'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -18,8 +19,8 @@ const ACCOUNT_OPTIONS: { name: string; type: AccountType; emoji: string; desc: s
   { name: 'Bank Savings',  type: 'bankSavings',  emoji: '🏦', desc: 'BDO, BPI, Metrobank, etc.' },
   { name: 'Bank Checking', type: 'bankChecking', emoji: '🏛️', desc: 'Checking / current account' },
   { name: 'Credit Card',   type: 'creditCard',   emoji: '💳', desc: 'Visa, Mastercard, etc.' },
-  { name: 'SSS/GSIS',      type: 'sss',          emoji: '🛡️', desc: 'Government contributions' },
-  { name: 'Investments',   type: 'investment',   emoji: '📈', desc: 'Stocks, mutual funds, crypto' },
+  { name: 'SSS/GSIS',      type: 'custom',       emoji: '🛡️', desc: 'Government contributions' },
+  { name: 'Investments',   type: 'custom',       emoji: '📈', desc: 'Stocks, mutual funds, crypto' },
 ]
 
 export default function OnboardingPage() {
@@ -47,9 +48,9 @@ export default function OnboardingPage() {
     // Replace default accounts with user's selection
     await db.accounts.clear()
     const chosen = ACCOUNT_OPTIONS.filter((a) => selected.has(a.name))
-    await db.accounts.bulkAdd(
-      chosen.map((a, i) => newAccount({ name: a.name, type: a.type, sortOrder: i }))
-    )
+    const accounts = chosen.map((a, i) => newAccount({ name: a.name, type: a.type, sortOrder: i }))
+    await db.accounts.bulkAdd(accounts)
+    syncUpsert('accounts', accounts)
     setOnboardingDone(true)
     router.replace('/dashboard')
   }
