@@ -3,9 +3,14 @@ import { streamOpenAI } from './providers/openai'
 import { streamAlibaba } from './providers/alibaba'
 import type { ApiProvider } from '@/store/app-store'
 
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; mediaType: string; data: string }
+  | { type: 'document'; mediaType: 'application/pdf'; data: string }
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
-  content: string
+  content: string | ContentBlock[]
 }
 
 export async function* streamChat(
@@ -21,20 +26,20 @@ export async function* streamChat(
     return
   }
 
-  // Only send role/content to the LLM (no extra fields)
-  const msgs = messages.map((m) => ({ role: m.role, content: m.content }))
-
   switch (provider) {
     case 'anthropic':
-      yield* streamAnthropic(msgs, systemPrompt, apiKey, model, endpoint)
+      yield* streamAnthropic(messages, systemPrompt, apiKey, model, endpoint)
       break
     case 'alibaba':
-      yield* streamAlibaba(msgs, systemPrompt, apiKey, model, endpoint)
+      yield* streamAlibaba(
+        messages.map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : m.content.map((b) => b.type === 'text' ? b.text : '[file attached]').join('\n') })),
+        systemPrompt, apiKey, model, endpoint,
+      )
       break
     case 'openai':
     case 'custom':
     default:
-      yield* streamOpenAI(msgs, systemPrompt, apiKey, model, endpoint)
+      yield* streamOpenAI(messages, systemPrompt, apiKey, model, endpoint)
       break
   }
 }

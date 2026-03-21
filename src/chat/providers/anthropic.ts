@@ -1,5 +1,22 @@
+import type { ChatMessage } from '../engine'
+
+type AnthropicContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+  | { type: 'document'; source: { type: 'base64'; media_type: 'application/pdf'; data: string } }
+
+function toAnthropicContent(msg: ChatMessage): AnthropicContentBlock[] | string {
+  if (typeof msg.content === 'string') return msg.content
+  return msg.content.map((block) => {
+    if (block.type === 'text') return { type: 'text' as const, text: block.text }
+    if (block.type === 'image') return { type: 'image' as const, source: { type: 'base64' as const, media_type: block.mediaType, data: block.data } }
+    if (block.type === 'document') return { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: block.data } }
+    return { type: 'text' as const, text: '' }
+  })
+}
+
 export async function* streamAnthropic(
-  messages: { role: 'user' | 'assistant'; content: string }[],
+  messages: ChatMessage[],
   systemPrompt: string,
   apiKey: string,
   model: string,
@@ -13,12 +30,13 @@ export async function* streamAnthropic(
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
+      'anthropic-beta': 'pdfs-2024-09-25',
     },
     body: JSON.stringify({
       model,
-      max_tokens: 1024,
+      max_tokens: 2048,
       system: systemPrompt,
-      messages,
+      messages: messages.map((m) => ({ role: m.role, content: toAnthropicContent(m) })),
       stream: true,
     }),
   })

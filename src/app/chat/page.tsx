@@ -1,11 +1,11 @@
 'use client'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Send, Loader2, CheckCircle, XCircle, Sparkles } from 'lucide-react'
+import { Send, Loader2, CheckCircle, XCircle, Sparkles, Paperclip, X, Trash2 } from 'lucide-react'
 import { db } from '@/core/database/db'
 import { useAppStore } from '@/store/app-store'
 import { buildSystemPrompt } from '@/chat/system-prompt'
-import { streamChat, type ChatMessage } from '@/chat/engine'
+import { streamChat, type ChatMessage, type ContentBlock } from '@/chat/engine'
 import { parseActions, stripActions, executeAction, type ParsedAction } from '@/chat/actions'
 import { executeBalanceTool } from '@/core/tools/balance-tool'
 import { executeBudgetTool } from '@/core/tools/budget-tool'
@@ -13,13 +13,44 @@ import { executeSafeToSpendTool } from '@/core/tools/safe-to-spend-tool'
 import { formatPHP } from '@/lib/php-formatter'
 import { BOT_NAME } from '@/lib/constants'
 import { clsx } from 'clsx'
+import * as XLSX from 'xlsx'
+
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
+
+interface AttachedFile {
+  name: string
+  type: 'image' | 'pdf' | 'spreadsheet' | 'text'
+  /** base64 for image/pdf, plain text for spreadsheet/csv */
+  content: string
+  mediaType?: string
+}
 
 interface UIMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  attachedFile?: AttachedFile
   actions?: ParsedAction[]
   actionsConfirmed?: boolean
+}
+
+function uiToEngineMessage(msg: UIMessage): ChatMessage {
+  if (!msg.attachedFile) return { role: msg.role, content: msg.content }
+
+  const file = msg.attachedFile
+  const blocks: ContentBlock[] = []
+
+  if (file.type === 'image') {
+    blocks.push({ type: 'image', mediaType: file.mediaType ?? 'image/jpeg', data: file.content })
+  } else if (file.type === 'pdf') {
+    blocks.push({ type: 'document', mediaType: 'application/pdf', data: file.content })
+  } else {
+    // spreadsheet/text: inject as text context
+    blocks.push({ type: 'text', text: `[File: ${file.name}]\n\`\`\`\n${file.content.slice(0, 8000)}\n\`\`\`` })
+  }
+
+  if (msg.content) blocks.push({ type: 'text', text: msg.content })
+  return { role: msg.role, content: blocks }
 }
 
 export default function ChatPage() {
@@ -27,17 +58,68 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<UIMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const accounts     = useLiveQuery(() => db.accounts.toArray().then(r => r.filter(a => !a.isArchived)), [])
+  const accounts     = useLiveQuery(() => db.accounts.toArray().then(r => r.filter(a => !a.isArchived && !a.deletedAt)), [])
   const transactions = useLiveQuery(() => db.transactions.orderBy('date').reverse().limit(30).toArray(), [])
   const categories   = useLiveQuery(() => db.categories.toArray(), [])
   const budgets      = useLiveQuery(() => db.budgets.toArray().then(r => r.filter(b => b.isActive)), [])
 
+  // Load chat history from DB on mount (last 30 days)
+  useEffect(() => {
+    const cutoff = new Date(Date.now() - THIRTY_DAYS_MS).toISOString()
+    db.chatMessages
+      .where('timestamp').above(cutoff)
+      .sortBy('timestamp')
+      .then((rows) => {
+        const loaded: UIMessage[] = rows.map((r) => ({
+          id: r.id,
+          role: r.role,
+          content: r.content,
+          attachedFile: r.attachedFileName
+            ? { name: r.attachedFileName, type: 'image', content: r.attachedImageData ?? '', mediaType: 'image/jpeg' }
+            : undefined,
+          actionsConfirmed: true, // past actions already executed
+        }))
+        setMessages(loaded)
+        setHistoryLoaded(true)
+      })
+  }, [])
+
+  // Prune messages older than 30 days
+  useEffect(() => {
+    const cutoff = new Date(Date.now() - THIRTY_DAYS_MS).toISOString()
+    db.chatMessages.where('timestamp').below(cutoff).delete()
+  }, [])
+
+  useEffect(() => {
+    if (historyLoaded) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [historyLoaded])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  const saveMessage = async (msg: UIMessage) => {
+    await db.chatMessages.put({
+      id: msg.id,
+      role: msg.role,
+      content: msg.content,
+      timestamp: new Date().toISOString(),
+      attachedImageData: msg.attachedFile?.type === 'image' ? msg.attachedFile.content : undefined,
+      attachedFileName: msg.attachedFile?.name,
+    })
+  }
+
+  const clearHistory = async () => {
+    if (!confirm('Clear all chat history? This cannot be undone.')) return
+    await db.chatMessages.clear()
+    setMessages([])
+  }
 
   const buildContext = useCallback(() => {
     const accs = accounts ?? []
@@ -51,7 +133,6 @@ export default function ChatPage() {
 
     const catNames: Record<string, string> = {}
     cats.forEach((c) => { catNames[c.id] = c.name })
-
     const balMap: Record<string, number> = {}
     balResult.balances.forEach((b) => { balMap[b.account.id] = b.computedBalance })
 
@@ -69,22 +150,107 @@ export default function ChatPage() {
     })
   }, [accounts, transactions, categories, budgets, userName])
 
+  const processFile = (file: File): Promise<AttachedFile> => {
+    return new Promise((resolve, reject) => {
+      const name = file.name
+      const mime = file.type
+
+      // Images
+      if (mime.startsWith('image/')) {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const dataUrl = reader.result as string
+          const base64 = dataUrl.split(',')[1]
+          resolve({ name, type: 'image', content: base64, mediaType: mime })
+        }
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+        return
+      }
+
+      // PDF
+      if (mime === 'application/pdf') {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const dataUrl = reader.result as string
+          const base64 = dataUrl.split(',')[1]
+          resolve({ name, type: 'pdf', content: base64, mediaType: 'application/pdf' })
+        }
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+        return
+      }
+
+      // CSV / plain text
+      if (mime === 'text/csv' || mime === 'text/plain' || name.endsWith('.csv') || name.endsWith('.txt')) {
+        const reader = new FileReader()
+        reader.onload = () => resolve({ name, type: 'text', content: reader.result as string })
+        reader.onerror = reject
+        reader.readAsText(file)
+        return
+      }
+
+      // Excel (.xlsx / .xls)
+      if (name.endsWith('.xlsx') || name.endsWith('.xls') || mime.includes('spreadsheet') || mime.includes('excel')) {
+        const reader = new FileReader()
+        reader.onload = () => {
+          try {
+            const workbook = XLSX.read(reader.result, { type: 'array' })
+            const csvParts: string[] = []
+            workbook.SheetNames.forEach((sheetName) => {
+              const sheet = workbook.Sheets[sheetName]
+              const csv = XLSX.utils.sheet_to_csv(sheet)
+              if (csv.trim()) csvParts.push(`# Sheet: ${sheetName}\n${csv}`)
+            })
+            resolve({ name, type: 'spreadsheet', content: csvParts.join('\n\n') })
+          } catch (e) {
+            reject(e)
+          }
+        }
+        reader.onerror = reject
+        reader.readAsArrayBuffer(file)
+        return
+      }
+
+      reject(new Error(`Unsupported file type: ${mime || name}`))
+    })
+  }
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    try {
+      const processed = await processFile(file)
+      setAttachedFile(processed)
+    } catch (err) {
+      alert(`Could not read file: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   const sendMessage = async () => {
     const text = input.trim()
-    if (!text || loading) return
+    if ((!text && !attachedFile) || loading) return
 
-    const userMsg: UIMessage = { id: crypto.randomUUID(), role: 'user', content: text }
+    const userMsg: UIMessage = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: text,
+      attachedFile: attachedFile ?? undefined,
+    }
     const newMessages = [...messages, userMsg]
     setMessages(newMessages)
     setInput('')
+    setAttachedFile(null)
     setLoading(true)
+    await saveMessage(userMsg)
 
     const assistantId = crypto.randomUUID()
     setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }])
 
     try {
       const systemPrompt = buildContext()
-      const chatHistory: ChatMessage[] = newMessages.map((m) => ({ role: m.role, content: m.content }))
+      const chatHistory: ChatMessage[] = newMessages.map(uiToEngineMessage)
 
       let fullText = ''
       for await (const chunk of streamChat(chatHistory, systemPrompt, apiProvider, apiKey, apiModel, apiEndpoint)) {
@@ -96,18 +262,19 @@ export default function ChatPage() {
 
       const actions = parseActions(fullText)
       const displayText = stripActions(fullText)
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? { ...m, content: displayText, actions: actions.length > 0 ? actions : undefined }
-            : m
-        )
-      )
+      const assistantMsg: UIMessage = {
+        id: assistantId,
+        role: 'assistant',
+        content: displayText,
+        actions: actions.length > 0 ? actions : undefined,
+      }
+      setMessages((prev) => prev.map((m) => m.id === assistantId ? assistantMsg : m))
+      await saveMessage(assistantMsg)
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Something went wrong.'
-      setMessages((prev) =>
-        prev.map((m) => m.id === assistantId ? { ...m, content: `Error: ${errMsg}` } : m)
-      )
+      const errUiMsg: UIMessage = { id: assistantId, role: 'assistant', content: `Error: ${errMsg}` }
+      setMessages((prev) => prev.map((m) => m.id === assistantId ? errUiMsg : m))
+      await saveMessage(errUiMsg)
     } finally {
       setLoading(false)
     }
@@ -120,6 +287,8 @@ export default function ChatPage() {
     setMessages((prev) =>
       prev.map((m) => m.id === msgId ? { ...m, actionsConfirmed: true } : m)
     )
+    // Update DB record to mark confirmed
+    await db.chatMessages.where('id').equals(msgId).modify((r) => { r.content = r.content })
   }
 
   const dismissActions = (msgId: string) => {
@@ -142,10 +311,19 @@ export default function ChatPage() {
         <div className="w-8 h-8 rounded-full bg-brand flex items-center justify-center">
           <Sparkles size={16} className="text-white" />
         </div>
-        <div>
+        <div className="flex-1">
           <p className="font-semibold text-sm text-[var(--text-primary)]">{BOT_NAME} AI</p>
           <p className="text-xs text-[var(--text-secondary)]">Your personal finance buddy</p>
         </div>
+        {messages.length > 0 && (
+          <button
+            onClick={clearHistory}
+            title="Clear chat history"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs text-[var(--text-tertiary)] hover:text-expense hover:bg-expense/10 transition-colors"
+          >
+            <Trash2 size={13} /> Clear
+          </button>
+        )}
       </div>
 
       {/* Messages */}
@@ -157,7 +335,7 @@ export default function ChatPage() {
             </div>
             <p className="font-semibold text-[var(--text-primary)] mb-1">Hi{userName ? `, ${userName}` : ''}!</p>
             <p className="text-sm text-[var(--text-secondary)] max-w-xs mx-auto">
-              Ask me about your finances, record transactions, or get budgeting advice.
+              Ask me about your finances, record transactions, or upload a bank statement.
             </p>
             <div className="flex flex-wrap gap-2 justify-center mt-4">
               {[
@@ -181,6 +359,21 @@ export default function ChatPage() {
         {messages.map((msg) => (
           <div key={msg.id} className={clsx('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
             <div className={clsx('max-w-[80%] space-y-2')}>
+              {/* File attachment preview */}
+              {msg.attachedFile && (
+                <div className={clsx('flex items-center gap-2 px-3 py-2 rounded-xl text-xs', msg.role === 'user' ? 'bg-brand/80 text-white/90' : 'bg-[var(--surface-secondary)] text-[var(--text-secondary)]')}>
+                  <Paperclip size={11} />
+                  <span className="truncate max-w-[180px]">{msg.attachedFile.name}</span>
+                  {msg.attachedFile.type === 'image' && (
+                    <img
+                      src={`data:${msg.attachedFile.mediaType};base64,${msg.attachedFile.content}`}
+                      alt="attached"
+                      className="w-12 h-12 rounded object-cover ml-1"
+                    />
+                  )}
+                </div>
+              )}
+
               <div
                 className={clsx(
                   'rounded-2xl px-4 py-3 text-sm leading-relaxed',
@@ -205,6 +398,12 @@ export default function ChatPage() {
                       <div>
                         {a.type === 'delete_account' ? (
                           <span className="text-xs font-semibold text-expense">Delete account: {a.name}</span>
+                        ) : a.type === 'update_transaction' ? (
+                          <span className="text-xs font-semibold text-transfer">
+                            Update transaction
+                            {a.matchMerchant ? ` · ${a.matchMerchant}` : ''}
+                            {a.newAmount != null ? ` → ${formatPHP(a.newAmount)}` : ''}
+                          </span>
                         ) : (
                           <>
                             <span className={clsx(
@@ -238,9 +437,9 @@ export default function ChatPage() {
                 </div>
               )}
 
-              {msg.actionsConfirmed && (
+              {msg.actionsConfirmed && msg.actions && (
                 <p className="text-xs text-income flex items-center gap-1 px-1">
-                  <CheckCircle size={12} /> Transaction{(msg.actions?.length ?? 1) > 1 ? 's' : ''} recorded!
+                  <CheckCircle size={12} /> Done!
                 </p>
               )}
             </div>
@@ -256,7 +455,35 @@ export default function ChatPage() {
             No API key set — <a href="/settings" className="underline">configure in Settings</a>
           </p>
         )}
+
+        {/* Attached file chip */}
+        {attachedFile && (
+          <div className="flex items-center gap-2 mb-2 px-3 py-1.5 bg-brand/10 rounded-lg w-fit max-w-full">
+            <Paperclip size={12} className="text-brand shrink-0" />
+            <span className="text-xs text-brand truncate max-w-[200px]">{attachedFile.name}</span>
+            <button onClick={() => setAttachedFile(null)} className="text-brand/60 hover:text-brand shrink-0">
+              <X size={12} />
+            </button>
+          </div>
+        )}
+
         <div className="flex items-end gap-2">
+          {/* File upload button */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach file (image, PDF, CSV, Excel)"
+            className="w-10 h-10 rounded-full border border-[var(--border)] flex items-center justify-center text-[var(--text-tertiary)] hover:text-brand hover:border-brand transition-colors shrink-0"
+          >
+            <Paperclip size={16} />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,.pdf,.csv,.txt,.xlsx,.xls"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+
           <textarea
             ref={textareaRef}
             value={input}
@@ -269,14 +496,14 @@ export default function ChatPage() {
           />
           <button
             onClick={sendMessage}
-            disabled={!input.trim() || loading}
-            className="w-11 h-11 rounded-full bg-brand flex items-center justify-center text-white disabled:opacity-40 transition-opacity shrink-0"
+            disabled={(!input.trim() && !attachedFile) || loading}
+            className="w-10 h-10 rounded-full bg-brand flex items-center justify-center text-white disabled:opacity-40 transition-opacity shrink-0"
           >
             {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
           </button>
         </div>
         <p className="text-xs text-[var(--text-tertiary)] text-center mt-2">
-          Press Enter to send · Shift+Enter for new line
+          Enter to send · Shift+Enter for new line · Attach images, PDFs, CSV, Excel
         </p>
       </div>
     </div>
