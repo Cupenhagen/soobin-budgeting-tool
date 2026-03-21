@@ -5,7 +5,8 @@ const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/access-denied(.*)',
-  '/auth/callback(.*)',
+  '/auth/callback(.*)',    // server-side approval check
+  '/auth/refreshing(.*)', // client-side JWT reload after first approval
 ])
 
 // DEV BYPASS: skip all auth when NEXT_PUBLIC_DEV_BYPASS_AUTH=true

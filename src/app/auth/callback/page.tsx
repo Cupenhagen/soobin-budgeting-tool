@@ -24,9 +24,12 @@ export default async function AuthCallbackPage() {
 
   if (approved) {
     if (!metadata.approved) {
+      // First-time approval — update metadata then redirect through the
+      // refresh page so the client reloads the JWT before hitting the dashboard.
       await client.users.updateUser(userId, {
         publicMetadata: { ...metadata, approved: true },
       })
+      redirect('/auth/refreshing')
     }
     redirect('/dashboard')
   } else {
