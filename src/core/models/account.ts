@@ -17,6 +17,7 @@ export interface Account {
   dueDay?: number
   createdAt: string
   updatedAt: string
+  deletedAt?: string   // soft-delete: set when moved to Trash
 }
 
 export function newAccount(

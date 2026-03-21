@@ -54,6 +54,19 @@ class SoobinDatabase extends Dexie {
       pendingSuggestions:   'id, recurringTransactionId, status',
       chatMessages:         'id, timestamp',
     })
+
+    // v3: add deletedAt index to accounts for soft-delete / recycle bin
+    this.version(3).stores({
+      transactions:         'id, type, accountId, destinationAccountId, categoryId, date, createdAt',
+      accounts:             'id, type, sortOrder, isArchived, deletedAt',
+      budgets:              'id, categoryId, isActive',
+      categories:           'id, type, isBuiltIn, isHidden, sortOrder',
+      savingsGoals:         'id, isCompleted',
+      debts:                'id, type, isActive',
+      recurringTransactions:'id, nextDueDate, isActive',
+      pendingSuggestions:   'id, recurringTransactionId, status',
+      chatMessages:         'id, timestamp',
+    })
   }
 }
 
