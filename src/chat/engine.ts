@@ -31,10 +31,7 @@ export async function* streamChat(
       yield* streamAnthropic(messages, systemPrompt, apiKey, model, endpoint)
       break
     case 'alibaba':
-      yield* streamAlibaba(
-        messages.map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : m.content.map((b) => b.type === 'text' ? b.text : '[file attached]').join('\n') })),
-        systemPrompt, apiKey, model, endpoint,
-      )
+      yield* streamAlibaba(messages, systemPrompt, apiKey, model, endpoint)
       break
     case 'openai':
     case 'custom':

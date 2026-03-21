@@ -1,6 +1,19 @@
-// Alibaba DashScope uses OpenAI-compatible streaming endpoint
+// Alibaba DashScope uses OpenAI-compatible streaming endpoint.
+// Qwen-VL models support vision via image_url (base64).
+import type { ChatMessage } from '../engine'
+
+function toAlibabaContent(msg: ChatMessage): string | { type: string; text?: string; image_url?: { url: string } }[] {
+  if (typeof msg.content === 'string') return msg.content
+  return msg.content.map((block) => {
+    if (block.type === 'text') return { type: 'text', text: block.text }
+    if (block.type === 'image') return { type: 'image_url', image_url: { url: `data:${block.mediaType};base64,${block.data}` } }
+    // PDF not supported — fall back to text note
+    return { type: 'text', text: '[A PDF was attached — please describe its content in text]' }
+  })
+}
+
 export async function* streamAlibaba(
-  messages: { role: 'user' | 'assistant'; content: string }[],
+  messages: ChatMessage[],
   systemPrompt: string,
   apiKey: string,
   model: string,
@@ -16,7 +29,10 @@ export async function* streamAlibaba(
     body: JSON.stringify({
       model,
       stream: true,
-      messages: [{ role: 'system', content: systemPrompt }, ...messages],
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...messages.map((m) => ({ role: m.role, content: toAlibabaContent(m) })),
+      ],
     }),
   })
 
