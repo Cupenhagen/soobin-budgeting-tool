@@ -199,19 +199,25 @@ export default function ChatPage() {
               {/* Action confirmation card */}
               {msg.actions && !msg.actionsConfirmed && (
                 <div className="bg-[var(--surface)] border border-[var(--border)] rounded-xl p-3 space-y-2">
-                  <p className="text-xs font-semibold text-[var(--text-secondary)]">Confirm transaction{msg.actions.length > 1 ? 's' : ''}:</p>
+                  <p className="text-xs font-semibold text-[var(--text-secondary)]">Confirm action{msg.actions.length > 1 ? 's' : ''}:</p>
                   {msg.actions.map((a, i) => (
                     <div key={i} className="flex items-center justify-between">
                       <div>
-                        <span className={clsx(
-                          'text-xs font-semibold',
-                          a.txType === 'income' ? 'text-income' : 'text-expense'
-                        )}>
-                          {a.txType === 'income' ? '+' : '-'}{formatPHP(a.amount)}
-                        </span>
-                        <span className="text-xs text-[var(--text-secondary)] ml-2">
-                          {a.merchant || a.category || a.note}
-                        </span>
+                        {a.type === 'delete_account' ? (
+                          <span className="text-xs font-semibold text-expense">Delete account: {a.name}</span>
+                        ) : (
+                          <>
+                            <span className={clsx(
+                              'text-xs font-semibold',
+                              a.txType === 'income' ? 'text-income' : 'text-expense'
+                            )}>
+                              {a.txType === 'income' ? '+' : '-'}{formatPHP(a.amount)}
+                            </span>
+                            <span className="text-xs text-[var(--text-secondary)] ml-2">
+                              {a.merchant || a.category || a.note}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   ))}
