@@ -22,15 +22,25 @@ export function AccountModal({ onClose, editAccount }: Props) {
   const [creditLimit, setCreditLimit] = useState(editAccount?.creditLimit ?? '')
   const [institution, setInstitution] = useState(editAccount?.institution ?? '')
   const [saving, setSaving] = useState(false)
+  const [nameError, setNameError] = useState('')
 
   const handleSave = async () => {
-    if (!name.trim()) return
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setNameError('')
     setSaving(true)
     try {
+      // Duplicate name check (exclude self when editing)
+      const duplicate = await accountRepo.findByName(trimmed)
+      if (duplicate && duplicate.id !== editAccount?.id) {
+        setNameError(`An account named "${duplicate.name}" already exists.`)
+        return
+      }
+
       if (editAccount) {
         await accountRepo.update({
           ...editAccount,
-          name: name.trim(),
+          name: trimmed,
           type,
           institution: institution || undefined,
           currentBalance: parseFloat(balance).toString(),
@@ -38,7 +48,7 @@ export function AccountModal({ onClose, editAccount }: Props) {
         })
       } else {
         const acc = newAccount({
-          name: name.trim(),
+          name: trimmed,
           type,
           institution: institution || undefined,
           currentBalance: parseFloat(balance).toString(),
@@ -73,7 +83,7 @@ export function AccountModal({ onClose, editAccount }: Props) {
       }
     >
       <div className="space-y-3">
-        <Input label="Name" placeholder="e.g. GCash, BDO Savings…" value={name} onChange={(e) => setName(e.target.value)} />
+        <Input label="Name" placeholder="e.g. GCash, BDO Savings…" value={name} onChange={(e) => { setName(e.target.value); setNameError('') }} error={nameError} />
 
         <Select label="Type" value={type} onChange={(e) => setType(e.target.value as AccountType)}>
           {ACCOUNT_TYPES.map(([value, label]) => (
