@@ -54,7 +54,7 @@ export function AccountModal({ onClose, editAccount }: Props) {
 
   const handleDelete = async () => {
     if (!editAccount || !confirm('Delete this account?')) return
-    await accountRepo.delete(editAccount.id)
+    await accountRepo.softDelete(editAccount)
     onClose()
   }
 
