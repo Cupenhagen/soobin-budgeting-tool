@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { APP_NAME } from '@/lib/constants'
 import { clsx } from 'clsx'
+import { UserButton, useUser } from '@clerk/nextjs'
 
 const DEV_BYPASS = process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true'
 
@@ -66,9 +67,6 @@ export function Sidebar() {
 }
 
 function SidebarUser() {
-  // Dynamically import Clerk hooks so this file compiles in bypass mode too
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { UserButton, useUser } = require('@clerk/nextjs')
   const { user, isLoaded } = useUser()
   if (!isLoaded) return null
 
