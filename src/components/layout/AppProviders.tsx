@@ -50,25 +50,32 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 
     getCloudAccountCount().then((count) => {
       if (count > 0) {
-        // Returning user on a new device — restore cloud data and skip onboarding
+        // Returning user on a new device — mark done immediately so we never
+        // redirect to onboarding, then restore cloud data in the background.
+        setOnboardingDone(true)
+        setCloudChecked(true)
         restoreFromCloud()
           .then(() => seedIfEmpty(userName))
-          .then(() => {
-            setOnboardingDone(true)
-            setCloudChecked(true)
-            router.replace('/dashboard')
-          })
-          .catch(() => {
-            setCloudChecked(true)
-            router.replace('/onboarding')
-          })
+          .catch((e) => console.warn('[AppProviders] cloud restore failed (will retry on next load):', e))
+        // Navigation is handled by the onboardingDone useEffect above
+      } else if (count === 0) {
+        // Definitively no cloud data — brand new user
+        setCloudChecked(true)
+        if (window.location.pathname !== '/onboarding') {
+          router.replace('/onboarding')
+        }
       } else {
-        // Brand new user
+        // count === -1: fetch failed (network/auth error) — don't redirect to onboarding,
+        // just show onboarding UI and let user decide
         setCloudChecked(true)
         if (window.location.pathname !== '/onboarding') {
           router.replace('/onboarding')
         }
       }
+    }).catch(() => {
+      // Unexpected error — fall back to onboarding
+      setCloudChecked(true)
+      router.replace('/onboarding')
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onboardingDone])

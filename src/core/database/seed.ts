@@ -62,12 +62,18 @@ export async function seedIfEmpty(userName: string): Promise<void> {
  * Check if the user already has cloud data (returning user on new device).
  * Returns the number of accounts found in Supabase.
  */
+/** Returns: >0 = has data, 0 = confirmed empty, -1 = fetch failed */
 export async function getCloudAccountCount(): Promise<number> {
   try {
     const accounts = await cloudFetch<Account>('accounts')
-    return accounts.filter((a) => !a.deletedAt).length
-  } catch {
-    return 0
+    const count = accounts.filter((a: Account) => !a.deletedAt).length
+    if (count > 0) return count
+    // Also check categories as fallback (seeded on first onboarding)
+    const categories = await cloudFetch<{ id: string }>('categories')
+    return categories.length > 0 ? 1 : 0
+  } catch (e) {
+    console.warn('[onboarding check] cloud fetch failed:', e)
+    return -1
   }
 }
 
