@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAppStore } from '@/store/app-store'
-import { seedIfEmpty } from '@/core/database/seed'
+import { seedIfEmpty, restoreFromCloud } from '@/core/database/seed'
 import { db } from '@/core/database/db'
 import { newAccount } from '@/core/models/account'
 import { syncUpsert } from '@/lib/cloud-sync'
@@ -28,8 +28,23 @@ export default function OnboardingPage() {
   const [name, setName]         = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set(['Cash', 'GCash']))
   const [loading, setLoading]   = useState(false)
+  const [restoring, setRestoring] = useState(false)
   const { setUserName, setOnboardingDone } = useAppStore()
   const router = useRouter()
+
+  const handleRestore = async () => {
+    setRestoring(true)
+    try {
+      await restoreFromCloud()
+      await seedIfEmpty('Friend')
+      setOnboardingDone(true)
+      fetch('/api/user/status', { method: 'POST' }).catch(() => {})
+      router.replace('/dashboard')
+    } catch (err) {
+      alert(`Restore failed: ${err instanceof Error ? err.message : String(err)}\n\nMake sure you're logged into the same account.`)
+      setRestoring(false)
+    }
+  }
 
   const toggleAccount = (accName: string) => {
     setSelected((prev) => {
@@ -152,6 +167,17 @@ export default function OnboardingPage() {
           <p className="text-xs text-center text-[var(--text-tertiary)] mt-4">
             All your data stays on your device. Private by default.
           </p>
+        </div>
+
+        {/* Returning user escape hatch */}
+        <div className="mt-4 text-center">
+          <button
+            onClick={handleRestore}
+            disabled={restoring}
+            className="text-xs text-white/60 hover:text-white underline underline-offset-2 transition-colors disabled:opacity-50"
+          >
+            {restoring ? 'Restoring your data…' : 'Already have an account? Click here to restore'}
+          </button>
         </div>
       </div>
     </div>
