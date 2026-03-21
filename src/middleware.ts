@@ -25,14 +25,31 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.redirect(url)
   }
 
-  const metadata = sessionClaims?.publicMetadata as Record<string, unknown> | undefined
-  const isApproved = metadata?.approved === true
+  // Fast path: publicMetadata is in the JWT (requires Clerk JWT template customisation —
+  // see README). If already approved here, skip the API call.
+  const jwtMeta = sessionClaims?.publicMetadata as Record<string, unknown> | undefined
+  if (jwtMeta?.approved === true) return NextResponse.next()
 
-  if (!isApproved) {
-    return NextResponse.redirect(new URL('/access-denied', req.url))
+  // Fallback: JWT doesn't contain publicMetadata yet (Clerk default).
+  // Make one backend API call to check approval directly from Clerk + env allowlist.
+  try {
+    const { clerkClient } = await import('@clerk/nextjs/server')
+    const { isUserApproved } = await import('@/lib/allowlist')
+
+    const client = await clerkClient()
+    const user = await client.users.getUser(userId)
+    const primaryEmail = user.emailAddresses.find(
+      (e) => e.id === user.primaryEmailAddressId,
+    )?.emailAddress
+
+    if (isUserApproved(primaryEmail, user.publicMetadata as Record<string, unknown>)) {
+      return NextResponse.next()
+    }
+  } catch (e) {
+    console.error('[middleware] approval check failed:', e)
   }
 
-  return NextResponse.next()
+  return NextResponse.redirect(new URL('/access-denied', req.url))
 })
 
 export const config = {
