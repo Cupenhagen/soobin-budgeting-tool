@@ -59,6 +59,19 @@ export async function seedIfEmpty(userName: string): Promise<void> {
 }
 
 /**
+ * Check if the user already has cloud data (returning user on new device).
+ * Returns the number of accounts found in Supabase.
+ */
+export async function getCloudAccountCount(): Promise<number> {
+  try {
+    const accounts = await cloudFetch<Account>('accounts')
+    return accounts.filter((a) => !a.deletedAt).length
+  } catch {
+    return 0
+  }
+}
+
+/**
  * Full cloud restore — call on every app load after onboarding.
  * Pulls all tables from Supabase into Dexie so useLiveQuery works.
  */
