@@ -42,17 +42,23 @@ export default function OnboardingPage() {
   const handleFinish = async () => {
     if (selected.size === 0) return
     setLoading(true)
-    const finalName = name.trim() || 'Friend'
-    setUserName(finalName)
-    await seedIfEmpty(finalName)
-    // Replace default accounts with user's selection
-    await db.accounts.clear()
-    const chosen = ACCOUNT_OPTIONS.filter((a) => selected.has(a.name))
-    const accounts = chosen.map((a, i) => newAccount({ name: a.name, type: a.type, sortOrder: i }))
-    await db.accounts.bulkAdd(accounts)
-    syncUpsert('accounts', accounts)
-    setOnboardingDone(true)
-    router.replace('/dashboard')
+    try {
+      const finalName = name.trim() || 'Friend'
+      setUserName(finalName)
+      await seedIfEmpty(finalName)
+      // Replace default accounts with user's selection
+      await db.accounts.clear()
+      const chosen = ACCOUNT_OPTIONS.filter((a) => selected.has(a.name))
+      const accounts = chosen.map((a, i) => newAccount({ name: a.name, type: a.type, sortOrder: i }))
+      await db.accounts.bulkAdd(accounts)
+      syncUpsert('accounts', accounts)
+      setOnboardingDone(true)
+      router.replace('/dashboard')
+    } catch (err) {
+      console.error('[onboarding] handleFinish error:', err)
+      setLoading(false)
+      alert(`Setup failed: ${err instanceof Error ? err.message : String(err)}\n\nCheck the browser console for details.`)
+    }
   }
 
   return (
