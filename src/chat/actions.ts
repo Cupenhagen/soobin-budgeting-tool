@@ -3,8 +3,10 @@ import { newTransaction } from '@/core/models/transaction'
 import { newBudget } from '@/core/models/budget'
 import { newSavingsGoal } from '@/core/models/savings-goal'
 import { accountRepo } from '@/core/repositories/account-repo'
+import { recurringRepo } from '@/core/repositories/recurring-repo'
+import { newRecurring } from '@/core/models/recurring-transaction'
 import { syncUpsert } from '@/lib/cloud-sync'
-import type { TransactionType, BudgetPeriod } from '@/core/models/enums'
+import type { TransactionType, BudgetPeriod, RecurrenceFrequencyType } from '@/core/models/enums'
 
 export type ParsedAction =
   | { type: 'add_transaction'; amount: number; txType: TransactionType; category: string; merchant: string; note: string; date: string }
@@ -12,8 +14,10 @@ export type ParsedAction =
   | { type: 'delete_account'; name: string }
   | { type: 'add_budget'; categoryName: string; limitAmount: number; period: BudgetPeriod }
   | { type: 'add_savings_goal'; name: string; targetAmount: number; currentAmount: number; targetDate: string }
+  | { type: 'add_recurring'; description: string; amount: number; txType: TransactionType; category: string; freqType: RecurrenceFrequencyType; startDate: string; endDate: string }
+  | { type: 'cancel_recurring'; name: string }
 
-const ACTION_REGEX = /\[TIARA_ACTION:\s*(add_transaction|update_transaction|delete_account|add_budget|add_savings_goal)\s*\|([^\]]+)\]/gi
+const ACTION_REGEX = /\[TIARA_ACTION:\s*(add_transaction|update_transaction|delete_account|add_budget|add_savings_goal|add_recurring|cancel_recurring)\s*\|([^\]]+)\]/gi
 
 export function parseActions(text: string): ParsedAction[] {
   const actions: ParsedAction[] = []
@@ -75,6 +79,22 @@ export function parseActions(text: string): ParsedAction[] {
         currentAmount: parseFloat(params.current_amount ?? '0'),
         targetDate: params.target_date ?? '',
       })
+    } else if (actionType === 'add_recurring') {
+      const amount = parseFloat(params.amount ?? '0')
+      if (!amount || amount <= 0) continue
+      actions.push({
+        type: 'add_recurring',
+        description: params.description ?? '',
+        amount,
+        txType: (params.tx_type as TransactionType) ?? 'expense',
+        category: params.category ?? '',
+        freqType: (params.frequency as RecurrenceFrequencyType) ?? 'monthly',
+        startDate: params.start_date ?? new Date().toISOString().slice(0, 10),
+        endDate: params.end_date ?? '',
+      })
+    } else if (actionType === 'cancel_recurring') {
+      if (!params.name) continue
+      actions.push({ type: 'cancel_recurring', name: params.name })
     }
   }
 
@@ -128,6 +148,56 @@ export async function executeAction(action: ParsedAction): Promise<void> {
     }
     await db.transactions.put(updated)
     syncUpsert('transactions', updated)
+    return
+  }
+
+  if (action.type === 'cancel_recurring') {
+    const all = await recurringRepo.fetchAll()
+    const rt = all.find((r) =>
+      (r.template.merchantOrPayee ?? '').toLowerCase().includes(action.name.toLowerCase()) ||
+      action.name.toLowerCase().includes((r.template.merchantOrPayee ?? '').toLowerCase())
+    )
+    if (!rt) throw new Error(`No recurring transaction found matching "${action.name}".`)
+    await recurringRepo.update({ ...rt, isActive: false, updatedAt: new Date().toISOString() })
+    return
+  }
+
+  if (action.type === 'add_recurring') {
+    const categories = await db.categories.toArray()
+    const cat = action.category
+      ? categories.find(
+          (c) => c.name.toLowerCase().includes(action.category.toLowerCase()) ||
+                 action.category.toLowerCase().includes(c.name.toLowerCase())
+        )
+      : undefined
+    const allAccounts = await db.accounts.toArray()
+    const account = allAccounts.find((a) => !a.isArchived && !a.deletedAt) ?? allAccounts[0]
+    if (!account) throw new Error('No accounts found. Please add an account first.')
+
+    const startDt = new Date(action.startDate)
+    const freq = { type: action.freqType }
+    const { nextRecurrenceDate } = await import('@/core/models/enums')
+    const nextDue = startDt <= new Date()
+      ? nextRecurrenceDate(freq, startDt).toISOString()
+      : startDt.toISOString()
+
+    const rt = newRecurring({
+      template: {
+        type: action.txType,
+        amount: action.amount.toFixed(2),
+        currencyCode: 'PHP',
+        accountId: account.id,
+        categoryId: cat?.id,
+        merchantOrPayee: action.description || undefined,
+        tags: [],
+      },
+      frequency: freq,
+      startDate: action.startDate,
+      endDate: action.endDate || undefined,
+      nextDueDate: nextDue,
+      autoPost: false,
+    })
+    await recurringRepo.insert(rt)
     return
   }
 

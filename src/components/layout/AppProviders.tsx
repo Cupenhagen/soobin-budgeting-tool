@@ -4,6 +4,9 @@ import { useRouter } from 'next/navigation'
 import { AppShell } from './AppShell'
 import { useAppStore } from '@/store/app-store'
 import { seedIfEmpty, restoreFromCloud } from '@/core/database/seed'
+import { db } from '@/core/database/db'
+import { recurringRepo } from '@/core/repositories/recurring-repo'
+import { executeRecurringTool } from '@/core/tools/recurring-tool'
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
   const { theme, onboardingDone, userName, setOnboardingDone } = useAppStore()
@@ -26,11 +29,42 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     }
   }, [theme])
 
-  // On every load when already onboarded: restore cloud data into Dexie
+  // On every load when already onboarded: restore cloud data into Dexie, then run recurring engine
   useEffect(() => {
     if (!onboardingDone) return
     restoreFromCloud()
       .then(() => seedIfEmpty(userName))
+      .then(async () => {
+        // Generate pending suggestions for overdue recurring transactions
+        const [recurrings, suggestions] = await Promise.all([
+          recurringRepo.fetchActive(),
+          recurringRepo.fetchPending(),
+        ])
+        const { newSuggestions, updatedRecurrings } = executeRecurringTool(recurrings, suggestions, new Date())
+        await Promise.all([
+          ...newSuggestions.map((s) => recurringRepo.insertSuggestion(s)),
+          ...updatedRecurrings.map((r) => db.recurringTransactions.put(r)),
+        ])
+        // Auto-post if enabled
+        for (const s of newSuggestions) {
+          const rt = recurrings.find((r) => r.id === s.recurringTransactionId)
+          if (!rt?.autoPost) continue
+          const { newTransaction } = await import('@/core/models/transaction')
+          const { syncUpsert } = await import('@/lib/cloud-sync')
+          const tx = newTransaction({
+            type: rt.template.type,
+            amount: s.suggestedAmount,
+            accountId: rt.template.accountId,
+            categoryId: rt.template.categoryId,
+            merchantOrPayee: rt.template.merchantOrPayee,
+            note: rt.template.note,
+            date: s.suggestedDate.slice(0, 10),
+          })
+          await db.transactions.add(tx)
+          syncUpsert('transactions', tx)
+          await recurringRepo.updateSuggestion({ ...s, status: 'accepted', postedTransactionId: tx.id })
+        }
+      })
       .catch(console.error)
   }, [onboardingDone, userName])
 
