@@ -1,15 +1,19 @@
 import { db } from '@/core/database/db'
 import { newTransaction } from '@/core/models/transaction'
+import { newBudget } from '@/core/models/budget'
+import { newSavingsGoal } from '@/core/models/savings-goal'
 import { accountRepo } from '@/core/repositories/account-repo'
 import { syncUpsert } from '@/lib/cloud-sync'
-import type { TransactionType } from '@/core/models/enums'
+import type { TransactionType, BudgetPeriod } from '@/core/models/enums'
 
 export type ParsedAction =
   | { type: 'add_transaction'; amount: number; txType: TransactionType; category: string; merchant: string; note: string; date: string }
   | { type: 'update_transaction'; matchMerchant: string; matchDate: string; matchAmount: number; newAmount?: number; newCategory?: string; newMerchant?: string; newNote?: string; newDate?: string }
   | { type: 'delete_account'; name: string }
+  | { type: 'add_budget'; categoryName: string; limitAmount: number; period: BudgetPeriod }
+  | { type: 'add_savings_goal'; name: string; targetAmount: number; currentAmount: number; targetDate: string }
 
-const ACTION_REGEX = /\[TIARA_ACTION:\s*(add_transaction|update_transaction|delete_account)\s*\|([^\]]+)\]/gi
+const ACTION_REGEX = /\[TIARA_ACTION:\s*(add_transaction|update_transaction|delete_account|add_budget|add_savings_goal)\s*\|([^\]]+)\]/gi
 
 export function parseActions(text: string): ParsedAction[] {
   const actions: ParsedAction[] = []
@@ -52,6 +56,25 @@ export function parseActions(text: string): ParsedAction[] {
     } else if (actionType === 'delete_account') {
       if (!params.name) continue
       actions.push({ type: 'delete_account', name: params.name })
+    } else if (actionType === 'add_budget') {
+      const limitAmount = parseFloat(params.limit_amount ?? '0')
+      if (!limitAmount || limitAmount <= 0) continue
+      actions.push({
+        type: 'add_budget',
+        categoryName: params.category ?? '',
+        limitAmount,
+        period: (params.period as BudgetPeriod) ?? 'monthly',
+      })
+    } else if (actionType === 'add_savings_goal') {
+      const targetAmount = parseFloat(params.target_amount ?? '0')
+      if (!params.name || !targetAmount) continue
+      actions.push({
+        type: 'add_savings_goal',
+        name: params.name,
+        targetAmount,
+        currentAmount: parseFloat(params.current_amount ?? '0'),
+        targetDate: params.target_date ?? '',
+      })
     }
   }
 
@@ -105,6 +128,39 @@ export async function executeAction(action: ParsedAction): Promise<void> {
     }
     await db.transactions.put(updated)
     syncUpsert('transactions', updated)
+    return
+  }
+
+  if (action.type === 'add_budget') {
+    const categories = await db.categories.toArray()
+    const cat = action.categoryName
+      ? categories.find(
+          (c) => c.name.toLowerCase().includes(action.categoryName.toLowerCase()) ||
+                 action.categoryName.toLowerCase().includes(c.name.toLowerCase())
+        )
+      : undefined
+    const today = new Date()
+    const startDate = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10)
+    const budget = newBudget({
+      categoryId: cat?.id,
+      amount: action.limitAmount.toFixed(2),
+      period: action.period,
+      startDate,
+    })
+    await db.budgets.add(budget)
+    syncUpsert('budgets', budget)
+    return
+  }
+
+  if (action.type === 'add_savings_goal') {
+    const goal = newSavingsGoal({
+      name: action.name,
+      targetAmount: action.targetAmount.toFixed(2),
+      currentAmount: action.currentAmount > 0 ? action.currentAmount.toFixed(2) : '0',
+      targetDate: action.targetDate || undefined,
+    })
+    await db.savingsGoals.add(goal)
+    syncUpsert('savings_goals', goal)
     return
   }
 

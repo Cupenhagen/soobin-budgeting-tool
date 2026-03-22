@@ -492,7 +492,16 @@ export default function ChatPage() {
                   {msg.actions.map((a, i) => (
                     <div key={i} className="flex items-center justify-between">
                       <div>
-                        {a.type === 'delete_account' ? (
+                        {a.type === 'add_savings_goal' ? (
+                          <span className="text-xs font-semibold text-income">
+                            New savings goal: {a.name} → {formatPHP(a.targetAmount)}
+                            {a.targetDate ? ` by ${a.targetDate}` : ''}
+                          </span>
+                        ) : a.type === 'add_budget' ? (
+                          <span className="text-xs font-semibold text-transfer">
+                            New budget: {a.categoryName || 'Overall'} — {formatPHP(a.limitAmount)}/{a.period}
+                          </span>
+                        ) : a.type === 'delete_account' ? (
                           <span className="text-xs font-semibold text-expense">Delete account: {a.name}</span>
                         ) : a.type === 'update_transaction' ? (
                           <span className="text-xs font-semibold text-transfer">
