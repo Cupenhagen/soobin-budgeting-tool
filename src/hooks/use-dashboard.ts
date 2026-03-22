@@ -34,7 +34,7 @@ export function useDashboard() {
     const billsTotal    = upcomingBillsTotal(recurrings, 7, now)
     const goalResults   = goals.map((g) => executeSavingsGoalTool(g, now))
     const savingsContrib = goalResults.reduce((s, r) => s + (r.weeklyRequired ?? 0) * 4, 0)
-    const safeToSpend   = executeSafeToSpendTool({ totalBalance: balanceResult.totalBalance, budgetResult, upcomingBillsTotal: billsTotal, savingsGoalTarget: savingsContrib, referenceDate: now })
+    const safeToSpend   = executeSafeToSpendTool({ totalBalance: balanceResult.totalBalance, budgetResult, upcomingBillsTotal: billsTotal, savingsGoalTarget: savingsContrib, referenceDate: now, recurrings })
     const debtResult    = executeDebtTool(debts, now)
     const forecast      = executeForecastTool(transactions, budgets, now)
     const weeklySummary = weekSummary(transactions, now)
@@ -60,7 +60,7 @@ export function useDashboard() {
       balanceResult, budgetResult, billsTotal, goalResults,
       safeToSpend, debtResult, forecast, weeklySummary,
       calendarData, recentTransactions, coachMessage,
-      accounts, categories,
+      accounts, categories, recurrings,
     }
   }, [loading, accounts, transactions, budgets, categories, goals, debts, recurrings, now])
 

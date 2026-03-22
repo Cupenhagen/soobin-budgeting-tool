@@ -7,6 +7,7 @@ import { BudgetSummaryCard } from '@/components/dashboard/BudgetSummaryCard'
 import { RecentTransactions } from '@/components/dashboard/RecentTransactions'
 import { SavingsGoalCard } from '@/components/dashboard/SavingsGoalCard'
 import { UpcomingBillsCard } from '@/components/dashboard/UpcomingBillsCard'
+import { RecurringScheduleCard } from '@/components/dashboard/RecurringScheduleCard'
 
 export default function DashboardPage() {
   const { userName } = useAppStore()
@@ -33,7 +34,11 @@ export default function DashboardPage() {
       ) : (
         <>
           <HeroBalanceCard result={data.balanceResult} />
-          <SafeToSpendCard safe={data.safeToSpend} weekly={data.weeklySummary} />
+          <SafeToSpendCard totalBalance={data.balanceResult.totalBalance} recurrings={data.recurrings ?? []} />
+
+          {data.recurrings && data.recurrings.length > 0 && (
+            <RecurringScheduleCard recurrings={data.recurrings} categories={data.categories ?? []} />
+          )}
 
           {data.budgetResult.statuses.length > 0 && (
             <BudgetSummaryCard
