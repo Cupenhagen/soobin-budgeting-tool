@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef, useEffect, useCallback } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Send, Loader2, CheckCircle, XCircle, Sparkles, Paperclip, X, Trash2 } from 'lucide-react'
 import { db } from '@/core/database/db'
@@ -16,6 +16,100 @@ import { clsx } from 'clsx'
 import * as XLSX from 'xlsx'
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
+
+// ── Markdown renderer ────────────────────────────────────────────────────────
+
+function isTableRow(line: string) { return line.trim().startsWith('|') }
+function isSeparatorRow(line: string) { return /^\|[-| :]+\|$/.test(line.trim()) }
+
+function parseTable(lines: string[]): { headers: string[]; rows: string[][] } {
+  const dataLines = lines.filter((l) => !isSeparatorRow(l))
+  const parse = (l: string) => l.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim())
+  const [headerLine, ...bodyLines] = dataLines
+  return { headers: parse(headerLine ?? ''), rows: bodyLines.map(parse) }
+}
+
+function RenderedTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-[var(--border)] my-2">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="bg-[var(--surface)] border-b border-[var(--border)]">
+            {headers.map((h, i) => (
+              <th key={i} className="px-3 py-2 text-left font-semibold text-[var(--text-secondary)] whitespace-nowrap">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, ri) => (
+            <tr key={ri} className={ri % 2 === 0 ? 'bg-[var(--surface-secondary)]' : 'bg-[var(--surface)]'}>
+              {row.map((cell, ci) => {
+                const isAmount = /^[₱+-]/.test(cell) || /^\d/.test(cell)
+                const isIncome = cell.toLowerCase().includes('income') || cell.startsWith('+')
+                const isExpense = cell.toLowerCase().includes('expense') || cell.startsWith('-')
+                return (
+                  <td
+                    key={ci}
+                    className={clsx(
+                      'px-3 py-2 whitespace-nowrap',
+                      isAmount && 'font-mono',
+                      isIncome && 'text-income',
+                      isExpense && 'text-expense',
+                      !isIncome && !isExpense && 'text-[var(--text-primary)]'
+                    )}
+                  >
+                    {cell}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function renderInline(text: string): React.ReactNode {
+  // bold: **text**
+  const parts = text.split(/(\*\*[^*]+\*\*)/)
+  return parts.map((p, i) =>
+    p.startsWith('**') && p.endsWith('**')
+      ? <strong key={i} className="font-semibold">{p.slice(2, -2)}</strong>
+      : p
+  )
+}
+
+function MessageContent({ text }: { text: string }) {
+  const lines = text.split('\n')
+  const segments: React.ReactNode[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    if (isTableRow(lines[i])) {
+      const tableLines: string[] = []
+      while (i < lines.length && isTableRow(lines[i])) {
+        tableLines.push(lines[i])
+        i++
+      }
+      const { headers, rows } = parseTable(tableLines)
+      if (rows.length > 0) {
+        segments.push(<RenderedTable key={i} headers={headers} rows={rows} />)
+        continue
+      }
+    }
+
+    const line = lines[i]
+    if (line.trim() === '') {
+      segments.push(<br key={i} />)
+    } else {
+      segments.push(<span key={i} className="block">{renderInline(line)}</span>)
+    }
+    i++
+  }
+
+  return <>{segments}</>
+}
 
 interface AttachedFile {
   name: string
@@ -382,11 +476,13 @@ export default function ChatPage() {
                     : 'bg-[var(--surface-secondary)] text-[var(--text-primary)] rounded-bl-sm'
                 )}
               >
-                {msg.content || (loading && msg.role === 'assistant' ? (
+                {loading && msg.role === 'assistant' && !msg.content ? (
                   <span className="flex items-center gap-2 text-[var(--text-secondary)]">
                     <Loader2 size={14} className="animate-spin" /> Thinking…
                   </span>
-                ) : '')}
+                ) : (
+                  <MessageContent text={msg.content} />
+                )}
               </div>
 
               {/* Action confirmation card */}
