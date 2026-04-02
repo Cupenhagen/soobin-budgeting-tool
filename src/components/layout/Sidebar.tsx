@@ -10,8 +10,6 @@ import { APP_NAME } from '@/lib/constants'
 import { clsx } from 'clsx'
 import { UserButton, useUser } from '@clerk/nextjs'
 
-const DEV_BYPASS = process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true'
-
 const NAV_ITEMS = [
   { href: '/dashboard',    label: 'Dashboard',     icon: LayoutDashboard },
   { href: '/transactions', label: 'Transactions',  icon: ArrowLeftRight },
@@ -25,7 +23,7 @@ const NAV_ITEMS = [
   { href: '/settings',     label: 'Settings',      icon: Settings },
 ]
 
-export function Sidebar() {
+export function Sidebar({ devBypass = false }: { devBypass?: boolean }) {
   const pathname = usePathname()
 
   return (
@@ -61,7 +59,7 @@ export function Sidebar() {
       </nav>
 
       {/* User section — only shown when Clerk is active */}
-      {!DEV_BYPASS && <SidebarUser />}
+      {!devBypass && <SidebarUser />}
     </aside>
   )
 }

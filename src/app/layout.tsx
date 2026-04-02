@@ -10,13 +10,13 @@ export const metadata: Metadata = {
   themeColor: '#7C3AED',
 }
 
-const DEV_BYPASS = process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true'
+const DEV_BYPASS = process.env.DEV_BYPASS_AUTH === 'true'
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const inner = (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <AppProviders>{children}</AppProviders>
+        <AppProviders devBypass={DEV_BYPASS}>{children}</AppProviders>
       </body>
     </html>
   )

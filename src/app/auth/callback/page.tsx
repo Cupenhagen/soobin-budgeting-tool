@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 
-const DEV_BYPASS = process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true'
+const DEV_BYPASS = process.env.DEV_BYPASS_AUTH === 'true'
 
 export default async function AuthCallbackPage() {
   // In dev bypass mode just go straight to the app

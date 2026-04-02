@@ -8,7 +8,7 @@ import { db } from '@/core/database/db'
 import { recurringRepo } from '@/core/repositories/recurring-repo'
 import { executeRecurringTool } from '@/core/tools/recurring-tool'
 
-export function AppProviders({ children }: { children: React.ReactNode }) {
+export function AppProviders({ children, devBypass = false }: { children: React.ReactNode; devBypass?: boolean }) {
   const { theme, onboardingDone, userName, setOnboardingDone } = useAppStore()
   const router = useRouter()
   const [cloudChecked, setCloudChecked] = useState(false)
@@ -110,5 +110,5 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 
   if (!onboardingDone) return <>{children}</>
 
-  return <AppShell>{children}</AppShell>
+  return <AppShell devBypass={devBypass}>{children}</AppShell>
 }

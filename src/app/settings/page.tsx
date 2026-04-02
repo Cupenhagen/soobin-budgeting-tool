@@ -56,35 +56,31 @@ export default function SettingsPage() {
     setTestResult(null)
     setTestMessage('')
     try {
-      // All providers support a lightweight models-list or chat endpoint
-      let url = ''
-      let headers: Record<string, string> = { 'Content-Type': 'application/json' }
-      let body: string | undefined
-
-      if (apiProviderInput === 'anthropic') {
-        url = 'https://api.anthropic.com/v1/messages'
-        headers = { ...headers, 'x-api-key': apiKeyInput, 'anthropic-version': '2023-06-01' }
-        body = JSON.stringify({ model: apiModelInput || 'claude-haiku-20240307', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] })
-      } else {
-        // OpenAI-compatible (Alibaba, OpenAI, custom) — use /models list endpoint
-        const base = apiEndpointInput.replace(/\/$/, '')
-        url = `${base}/models`
-        headers = { ...headers, Authorization: `Bearer ${apiKeyInput}` }
-      }
-
-      const res = await fetch(url, { method: body ? 'POST' : 'GET', headers, body, signal: AbortSignal.timeout(8000) })
-      if (res.ok || res.status === 400 /* Anthropic returns 400 for tiny requests but key is valid */) {
+      // Test key via server-side proxy — never send the key directly to third-party from browser
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'hi' }],
+          systemPrompt: 'Reply with OK.',
+          provider: apiProviderInput,
+          apiKey: apiKeyInput,
+          model: apiModelInput || 'gpt-4o',
+          endpoint: apiEndpointInput,
+        }),
+        signal: AbortSignal.timeout(15000),
+      })
+      if (res.ok) {
         setTestResult('success')
-        setTestMessage(`✓ Connected! Key is valid. (HTTP ${res.status})`)
+        setTestMessage('Connected! Key is valid.')
       } else {
-        const json = await res.json().catch(() => ({}))
-        const msg = (json as { error?: { message?: string } }).error?.message ?? `HTTP ${res.status}`
+        const text = await res.text().catch(() => '')
         setTestResult('error')
-        setTestMessage(`✗ ${msg}`)
+        setTestMessage(`HTTP ${res.status}${text ? `: ${text.slice(0, 200)}` : ''}`)
       }
     } catch (e) {
       setTestResult('error')
-      setTestMessage(`✗ ${e instanceof Error ? e.message : 'Request failed'}`)
+      setTestMessage(e instanceof Error ? e.message : 'Request failed')
     } finally {
       setTesting(false)
     }

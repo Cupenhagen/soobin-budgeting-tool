@@ -9,9 +9,9 @@ const isPublicRoute = createRouteMatcher([
   '/auth/refreshing(.*)', // client-side JWT reload after first approval
 ])
 
-// DEV BYPASS: skip all auth when NEXT_PUBLIC_DEV_BYPASS_AUTH=true
+// DEV BYPASS: skip all auth when DEV_BYPASS_AUTH=true (server-only env var).
 // Remove this before going to production.
-const DEV_BYPASS = process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true'
+const DEV_BYPASS = process.env.DEV_BYPASS_AUTH === 'true'
 
 export default clerkMiddleware(async (auth, req) => {
   if (DEV_BYPASS) return NextResponse.next()

@@ -1,4 +1,4 @@
-const DEV_BYPASS = process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true'
+const DEV_BYPASS = process.env.DEV_BYPASS_AUTH === 'true'
 export const DEV_USER_ID = 'dev-bypass-user'
 
 /**

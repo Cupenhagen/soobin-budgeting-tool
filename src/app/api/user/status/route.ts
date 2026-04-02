@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-const DEV_BYPASS = process.env.NEXT_PUBLIC_DEV_BYPASS_AUTH === 'true'
+const DEV_BYPASS = process.env.DEV_BYPASS_AUTH === 'true'
 
 /** GET /api/user/status — returns { onboarding_done: boolean } from Clerk publicMetadata */
 export async function GET() {
