@@ -34,3 +34,6 @@ Thumbs.db
 .vscode/
 *.swp
 .env.local.rtf
+
+# ─── MCP config — contains personal access tokens ─────────────────────────────
+.mcp.json
