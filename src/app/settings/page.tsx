@@ -28,13 +28,14 @@ const DEFAULT_ENDPOINTS: Record<ApiProvider, string> = {
 }
 
 export default function SettingsPage() {
-  const { userName, theme, apiProvider, apiKey, apiModel, apiEndpoint, setUserName, setTheme, setApiConfig } = useAppStore()
+  const { userName, theme, apiProvider, apiKey, apiModel, apiEndpoint, pdfExtractionModel, setUserName, setTheme, setApiConfig } = useAppStore()
 
   const [nameInput, setNameInput]       = useState(userName)
   const [apiProviderInput, setApiProviderInput] = useState<ApiProvider>(apiProvider)
   const [apiKeyInput, setApiKeyInput]   = useState(apiKey)
   const [apiModelInput, setApiModelInput] = useState(apiModel)
   const [apiEndpointInput, setApiEndpointInput] = useState(apiEndpoint)
+  const [pdfModelInput, setPdfModelInput] = useState(pdfExtractionModel)
   const [saved, setSaved]               = useState(false)
   const [testing, setTesting]           = useState(false)
   const [testResult, setTestResult]     = useState<'success' | 'error' | null>(null)
@@ -88,7 +89,7 @@ export default function SettingsPage() {
 
   const handleSave = () => {
     if (nameInput.trim()) setUserName(nameInput.trim())
-    setApiConfig({ provider: apiProviderInput, key: apiKeyInput, model: apiModelInput, endpoint: apiEndpointInput })
+    setApiConfig({ provider: apiProviderInput, key: apiKeyInput, model: apiModelInput, endpoint: apiEndpointInput, pdfExtractionModel: pdfModelInput })
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -128,6 +129,15 @@ export default function SettingsPage() {
             onChange={(e) => setApiKeyInput(e.target.value)}
           />
           <Input label="Model" placeholder="e.g. qwen-plus" value={apiModelInput} onChange={(e) => setApiModelInput(e.target.value)} />
+          {apiProviderInput === 'alibaba' && (
+            <Input
+              label="PDF Extraction Model"
+              placeholder="e.g. qwen3.6-plus"
+              value={pdfModelInput}
+              onChange={(e) => setPdfModelInput(e.target.value)}
+              hint="Used to read uploaded PDFs before passing content to the main model"
+            />
+          )}
           <Input label="Endpoint URL" placeholder="https://…" value={apiEndpointInput} onChange={(e) => setApiEndpointInput(e.target.value)} />
 
           {/* Test connection */}

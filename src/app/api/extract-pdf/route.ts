@@ -6,6 +6,7 @@ interface ExtractPdfBody {
   fileName: string
   apiKey: string
   endpoint: string
+  extractionModel?: string
 }
 
 function validate(body: unknown): body is ExtractPdfBody {
@@ -38,8 +39,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
-  const { pdfBase64, fileName, apiKey, endpoint } = body
+  const { pdfBase64, fileName, apiKey, endpoint, extractionModel } = body
   const base = endpoint.replace(/\/$/, '')
+  const model = extractionModel?.trim() || 'qwen3.6-plus'
 
   // ── Step 1: Upload PDF to DashScope Files API ──────────────────────────────
   const pdfBuffer = Buffer.from(pdfBase64, 'base64')
@@ -78,7 +80,7 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'qwen3.6-plus',
+        model,
         messages: [
           {
             role: 'system',

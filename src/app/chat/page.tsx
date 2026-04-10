@@ -166,7 +166,7 @@ function uiToEngineMessage(msg: UIMessage): ChatMessage {
 }
 
 export default function ChatPage() {
-  const { userName, apiProvider, apiKey, apiModel, apiEndpoint } = useAppStore()
+  const { userName, apiProvider, apiKey, apiModel, apiEndpoint, pdfExtractionModel } = useAppStore()
   const [messages, setMessages] = useState<UIMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -362,6 +362,7 @@ export default function ChatPage() {
             fileName: attachedFile.name,
             apiKey,
             endpoint: apiEndpoint,
+            extractionModel: pdfExtractionModel,
           }),
         })
         if (!res.ok) {

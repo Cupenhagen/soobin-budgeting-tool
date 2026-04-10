@@ -18,11 +18,12 @@ interface AppState {
   apiKey: string
   apiModel: string
   apiEndpoint: string
+  pdfExtractionModel: string
 
   setUserName: (name: string) => void
   setTheme: (t: Theme) => void
   setOnboardingDone: (v: boolean) => void
-  setApiConfig: (cfg: { provider?: ApiProvider; key?: string; model?: string; endpoint?: string }) => void
+  setApiConfig: (cfg: { provider?: ApiProvider; key?: string; model?: string; endpoint?: string; pdfExtractionModel?: string }) => void
 }
 
 export const useAppStore = create<AppState>()(
@@ -35,16 +36,18 @@ export const useAppStore = create<AppState>()(
       apiKey: '',
       apiModel: 'qwen-plus',
       apiEndpoint: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+      pdfExtractionModel: 'qwen3.6-plus',
 
       setUserName: (name) => set({ userName: name }),
       setTheme: (theme) => set({ theme }),
       setOnboardingDone: (onboardingDone) => set({ onboardingDone }),
       setApiConfig: (cfg) =>
         set((s) => ({
-          apiProvider: cfg.provider ?? s.apiProvider,
-          apiKey:      cfg.key      ?? s.apiKey,
-          apiModel:    cfg.model    ?? s.apiModel,
-          apiEndpoint: cfg.endpoint ?? s.apiEndpoint,
+          apiProvider:        cfg.provider          ?? s.apiProvider,
+          apiKey:             cfg.key               ?? s.apiKey,
+          apiModel:           cfg.model             ?? s.apiModel,
+          apiEndpoint:        cfg.endpoint          ?? s.apiEndpoint,
+          pdfExtractionModel: cfg.pdfExtractionModel ?? s.pdfExtractionModel,
         })),
     }),
     {
