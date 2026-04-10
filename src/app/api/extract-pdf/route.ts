@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'qwen-long',
+        model: 'qwen3.6-plus',
         messages: [
           {
             role: 'system',
