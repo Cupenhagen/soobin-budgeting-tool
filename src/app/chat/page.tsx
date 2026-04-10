@@ -20,7 +20,7 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 // ── PDF text extraction (client-side, no API call needed) ─────────────────────
 async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<string> {
   const pdfjsLib = await import('pdfjs-dist')
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
   const parts: string[] = []
   for (let i = 1; i <= pdf.numPages; i++) {
