@@ -6,9 +6,10 @@ function toAlibabaContent(msg: ChatMessage): string | { type: string; text?: str
   if (typeof msg.content === 'string') return msg.content
   return msg.content.map((block) => {
     if (block.type === 'text') return { type: 'text', text: block.text }
-    if (block.type === 'image') return { type: 'image_url', image_url: { url: `data:${block.mediaType};base64,${block.data}` } }
-    // PDF not supported — fall back to text note
-    return { type: 'text', text: '[A PDF was attached — please describe its content in text]' }
+    if (block.type === 'image' && block.data) return { type: 'image_url', image_url: { url: `data:${block.mediaType};base64,${block.data}` } }
+    if (block.type === 'image') return { type: 'text', text: `[Image: ${block.mediaType}]` }
+    // PDF should have been pre-extracted; fall back to text note if raw PDF somehow arrives
+    return { type: 'text', text: '[PDF content was attached]' }
   })
 }
 

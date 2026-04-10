@@ -152,9 +152,9 @@ function uiToEngineMessage(msg: UIMessage): ChatMessage {
   const file = msg.attachedFile
   const blocks: ContentBlock[] = []
 
-  if (file.type === 'image') {
+  if (file.type === 'image' && file.content) {
     blocks.push({ type: 'image', mediaType: file.mediaType ?? 'image/jpeg', data: file.content })
-  } else if (file.type === 'pdf') {
+  } else if (file.type === 'pdf' && file.content) {
     blocks.push({ type: 'document', mediaType: 'application/pdf', data: file.content })
   } else {
     // spreadsheet/text: inject as text context
@@ -193,8 +193,8 @@ export default function ChatPage() {
           id: r.id,
           role: r.role,
           content: r.content,
-          attachedFile: r.attachedFileName
-            ? { name: r.attachedFileName, type: 'image', content: r.attachedImageData ?? '', mediaType: 'image/jpeg' }
+          attachedFile: r.attachedFileName && r.attachedImageData
+            ? { name: r.attachedFileName, type: 'image', content: r.attachedImageData, mediaType: 'image/jpeg' }
             : undefined,
           actionsConfirmed: true, // past actions already executed
         }))
