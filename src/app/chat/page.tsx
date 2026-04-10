@@ -1,7 +1,7 @@
 'use client'
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Send, Loader2, CheckCircle, XCircle, Sparkles, Paperclip, X, Trash2 } from 'lucide-react'
+import { Send, Loader2, CheckCircle, XCircle, Sparkles, Paperclip, X, Trash2, FileSearch } from 'lucide-react'
 import { db } from '@/core/database/db'
 import { useAppStore } from '@/store/app-store'
 import { buildSystemPrompt } from '@/chat/system-prompt'
@@ -13,7 +13,7 @@ import { executeSafeToSpendTool } from '@/core/tools/safe-to-spend-tool'
 import { formatPHP } from '@/lib/php-formatter'
 import { BOT_NAME } from '@/lib/constants'
 import { clsx } from 'clsx'
-import * as XLSX from 'xlsx'
+import readXlsxFile, { type SheetData } from 'read-excel-file/browser'
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -111,6 +111,24 @@ function MessageContent({ text }: { text: string }) {
   return <>{segments}</>
 }
 
+function spreadsheetCellToString(cell: SheetData[number][number]) {
+  if (cell == null) return ''
+  if (cell instanceof Date) return cell.toISOString()
+  if (typeof cell === 'boolean') return cell ? 'true' : 'false'
+  return String(cell)
+}
+
+function escapeCsvCell(value: string) {
+  if (!/[",\n]/.test(value)) return value
+  return `"${value.replace(/"/g, '""')}"`
+}
+
+function sheetToCsv(rows: SheetData) {
+  return rows
+    .map((row) => row.map((cell) => escapeCsvCell(spreadsheetCellToString(cell))).join(','))
+    .join('\n')
+}
+
 interface AttachedFile {
   name: string
   type: 'image' | 'pdf' | 'spreadsheet' | 'text'
@@ -153,6 +171,7 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null)
+  const [extractingPdf, setExtractingPdf] = useState(false)
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -284,17 +303,16 @@ export default function ChatPage() {
         return
       }
 
-      // Excel (.xlsx / .xls)
-      if (name.endsWith('.xlsx') || name.endsWith('.xls') || mime.includes('spreadsheet') || mime.includes('excel')) {
+      // Excel (.xlsx only)
+      if (name.endsWith('.xlsx') || mime.includes('spreadsheet')) {
         const reader = new FileReader()
-        reader.onload = () => {
+        reader.onload = async () => {
           try {
-            const workbook = XLSX.read(reader.result, { type: 'array' })
+            const workbook = await readXlsxFile(reader.result as ArrayBuffer)
             const csvParts: string[] = []
-            workbook.SheetNames.forEach((sheetName) => {
-              const sheet = workbook.Sheets[sheetName]
-              const csv = XLSX.utils.sheet_to_csv(sheet)
-              if (csv.trim()) csvParts.push(`# Sheet: ${sheetName}\n${csv}`)
+            workbook.forEach(({ sheet, data }) => {
+              const csv = sheetToCsv(data)
+              if (csv.trim()) csvParts.push(`# Sheet: ${sheet}\n${csv}`)
             })
             resolve({ name, type: 'spreadsheet', content: csvParts.join('\n\n') })
           } catch (e) {
@@ -306,7 +324,7 @@ export default function ChatPage() {
         return
       }
 
-      reject(new Error(`Unsupported file type: ${mime || name}`))
+      reject(new Error(`Unsupported file type: ${mime || name}. Use .xlsx, .csv, .txt, images, or PDF.`))
     })
   }
 
@@ -314,6 +332,11 @@ export default function ChatPage() {
     const file = e.target.files?.[0]
     if (!file) return
     e.target.value = ''
+    const isPdf = file.type === 'application/pdf' || file.name.endsWith('.pdf')
+    if (isPdf && apiProvider !== 'alibaba') {
+      alert('PDF reading requires Alibaba / Qwen as your AI provider. Switch providers in Settings to use this feature.')
+      return
+    }
     try {
       const processed = await processFile(file)
       setAttachedFile(processed)
@@ -324,13 +347,48 @@ export default function ChatPage() {
 
   const sendMessage = async () => {
     const text = input.trim()
-    if ((!text && !attachedFile) || loading) return
+    if ((!text && !attachedFile) || loading || extractingPdf) return
+
+    // ── PDF extraction via qwen-long (Alibaba only) ───────────────────────────
+    let resolvedFile = attachedFile
+    if (apiProvider === 'alibaba' && attachedFile?.type === 'pdf') {
+      setExtractingPdf(true)
+      try {
+        const res = await fetch('/api/extract-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pdfBase64: attachedFile.content,
+            fileName: attachedFile.name,
+            apiKey,
+            endpoint: apiEndpoint,
+          }),
+        })
+        if (!res.ok) {
+          const { error } = (await res.json()) as { error: string }
+          alert(`Could not read PDF: ${error}`)
+          setExtractingPdf(false)
+          return
+        }
+        const { extractedText } = (await res.json()) as { extractedText: string }
+        resolvedFile = {
+          name: attachedFile.name,
+          type: 'text',
+          content: `[Extracted from PDF: ${attachedFile.name}]\n\n${extractedText}`,
+        }
+      } catch (err) {
+        alert(`PDF extraction error: ${err instanceof Error ? err.message : String(err)}`)
+        setExtractingPdf(false)
+        return
+      }
+      setExtractingPdf(false)
+    }
 
     const userMsg: UIMessage = {
       id: crypto.randomUUID(),
       role: 'user',
       content: text,
-      attachedFile: attachedFile ?? undefined,
+      attachedFile: resolvedFile ?? undefined,
     }
     const newMessages = [...messages, userMsg]
     setMessages(newMessages)
@@ -572,11 +630,21 @@ export default function ChatPage() {
         {/* Attached file chip */}
         {attachedFile && (
           <div className="flex items-center gap-2 mb-2 px-3 py-1.5 bg-brand/10 rounded-lg w-fit max-w-full">
-            <Paperclip size={12} className="text-brand shrink-0" />
-            <span className="text-xs text-brand truncate max-w-[200px]">{attachedFile.name}</span>
-            <button onClick={() => setAttachedFile(null)} className="text-brand/60 hover:text-brand shrink-0">
-              <X size={12} />
-            </button>
+            {extractingPdf ? (
+              <>
+                <FileSearch size={12} className="text-brand shrink-0 animate-pulse" />
+                <span className="text-xs text-brand">Reading document…</span>
+                <Loader2 size={12} className="text-brand animate-spin shrink-0" />
+              </>
+            ) : (
+              <>
+                <Paperclip size={12} className="text-brand shrink-0" />
+                <span className="text-xs text-brand truncate max-w-[200px]">{attachedFile.name}</span>
+                <button onClick={() => setAttachedFile(null)} className="text-brand/60 hover:text-brand shrink-0">
+                  <X size={12} />
+                </button>
+              </>
+            )}
           </div>
         )}
 
@@ -592,7 +660,7 @@ export default function ChatPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,.pdf,.csv,.txt,.xlsx,.xls"
+            accept="image/*,.pdf,.csv,.txt,.xlsx"
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -609,14 +677,15 @@ export default function ChatPage() {
           />
           <button
             onClick={sendMessage}
-            disabled={(!input.trim() && !attachedFile) || loading}
+            disabled={(!input.trim() && !attachedFile) || loading || extractingPdf}
             className="w-10 h-10 rounded-full bg-brand flex items-center justify-center text-white disabled:opacity-40 transition-opacity shrink-0"
           >
-            {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            {loading || extractingPdf ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
           </button>
         </div>
         <p className="text-xs text-[var(--text-tertiary)] text-center mt-2">
-          Enter to send · Shift+Enter for new line · Attach images, PDFs, CSV, Excel
+          Enter to send · Shift+Enter for new line · Attach images{apiProvider === 'alibaba' ? ', PDFs' : ''}, CSV, Excel
+          {apiProvider === 'alibaba' && <span className="text-brand/70"> · PDF reading powered by Qwen</span>}
         </p>
       </div>
     </div>

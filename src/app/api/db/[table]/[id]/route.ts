@@ -10,7 +10,7 @@ function isAllowed(table: string): table is TableName {
 /** DELETE /api/db/[table]/[id] — delete a single row */
 export async function DELETE(
   _req: NextRequest,
-  { params }: { params: { table: string; id: string } },
+  { params }: { params: Promise<{ table: string; id: string }> },
 ) {
   const userId = await getUserId()
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -19,7 +19,7 @@ export async function DELETE(
   const rl = rateLimit(`db-write:${userId}`, 30, 60_000)
   if (!rl.allowed) return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
 
-  const { table, id } = params
+  const { table, id } = await params
   if (!isAllowed(table)) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const supabase = createServerClient()

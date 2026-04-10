@@ -12,7 +12,7 @@ function isAllowed(table: string): table is TableName {
 /** GET /api/db/[table] — fetch all rows for the current user */
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { table: string } },
+  { params }: { params: Promise<{ table: string }> },
 ) {
   const userId = await getUserId()
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -21,7 +21,7 @@ export async function GET(
   const rl = rateLimit(`db-read:${userId}`, 60, 60_000)
   if (!rl.allowed) return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
 
-  const { table } = params
+  const { table } = await params
   if (!isAllowed(table)) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   const supabase = createServerClient()
@@ -40,7 +40,7 @@ export async function GET(
 /** POST /api/db/[table] — upsert one or many rows for the current user */
 export async function POST(
   req: NextRequest,
-  { params }: { params: { table: string } },
+  { params }: { params: Promise<{ table: string }> },
 ) {
   const userId = await getUserId()
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -49,7 +49,7 @@ export async function POST(
   const rl = rateLimit(`db-write:${userId}`, 30, 60_000)
   if (!rl.allowed) return NextResponse.json({ error: 'Too many requests' }, { status: 429 })
 
-  const { table } = params
+  const { table } = await params
   if (!isAllowed(table)) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
   let body: unknown
