@@ -17,6 +17,21 @@ import readXlsxFile, { type SheetData } from 'read-excel-file/browser'
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000
 
+// ── PDF text extraction (client-side, no API call needed) ─────────────────────
+async function extractPdfText(arrayBuffer: ArrayBuffer): Promise<string> {
+  const pdfjsLib = await import('pdfjs-dist')
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+  const parts: string[] = []
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i)
+    const content = await page.getTextContent()
+    const pageText = content.items.map((item) => ('str' in item ? item.str : '')).join(' ').trim()
+    if (pageText) parts.push(`[Page ${i}]\n${pageText}`)
+  }
+  return parts.join('\n\n')
+}
+
 // ── Markdown renderer ────────────────────────────────────────────────────────
 
 function isTableRow(line: string) { return line.trim().startsWith('|') }
@@ -166,7 +181,7 @@ function uiToEngineMessage(msg: UIMessage): ChatMessage {
 }
 
 export default function ChatPage() {
-  const { userName, apiProvider, apiKey, apiModel, apiEndpoint, pdfExtractionModel } = useAppStore()
+  const { userName, apiProvider, apiKey, apiModel, apiEndpoint } = useAppStore()
   const [messages, setMessages] = useState<UIMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -281,16 +296,23 @@ export default function ChatPage() {
         return
       }
 
-      // PDF
+      // PDF — extract text client-side with pdfjs-dist
       if (mime === 'application/pdf') {
         const reader = new FileReader()
-        reader.onload = () => {
-          const dataUrl = reader.result as string
-          const base64 = dataUrl.split(',')[1]
-          resolve({ name, type: 'pdf', content: base64, mediaType: 'application/pdf' })
+        reader.onload = async () => {
+          try {
+            const text = await extractPdfText(reader.result as ArrayBuffer)
+            if (text.trim().length < 30) {
+              reject(new Error('This PDF appears to be image-based (scanned) and cannot be read as text. Please use a digital/text-based PDF.'))
+              return
+            }
+            resolve({ name, type: 'text', content: `[PDF: ${name}]\n\n${text}` })
+          } catch {
+            reject(new Error('Could not read PDF. The file may be corrupted or password-protected.'))
+          }
         }
         reader.onerror = reject
-        reader.readAsDataURL(file)
+        reader.readAsArrayBuffer(file)
         return
       }
 
@@ -337,11 +359,14 @@ export default function ChatPage() {
       alert('PDF reading requires Alibaba / Qwen as your AI provider. Switch providers in Settings to use this feature.')
       return
     }
+    if (isPdf) setExtractingPdf(true)
     try {
       const processed = await processFile(file)
       setAttachedFile(processed)
     } catch (err) {
       alert(`Could not read file: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setExtractingPdf(false)
     }
   }
 
@@ -349,47 +374,11 @@ export default function ChatPage() {
     const text = input.trim()
     if ((!text && !attachedFile) || loading || extractingPdf) return
 
-    // ── PDF extraction via qwen-long (Alibaba only) ───────────────────────────
-    let resolvedFile = attachedFile
-    if (apiProvider === 'alibaba' && attachedFile?.type === 'pdf') {
-      setExtractingPdf(true)
-      try {
-        const res = await fetch('/api/extract-pdf', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            pdfBase64: attachedFile.content,
-            fileName: attachedFile.name,
-            apiKey,
-            endpoint: apiEndpoint,
-            extractionModel: pdfExtractionModel,
-          }),
-        })
-        if (!res.ok) {
-          const { error } = (await res.json()) as { error: string }
-          alert(`Could not read PDF: ${error}`)
-          setExtractingPdf(false)
-          return
-        }
-        const { extractedText } = (await res.json()) as { extractedText: string }
-        resolvedFile = {
-          name: attachedFile.name,
-          type: 'text',
-          content: `[Extracted from PDF: ${attachedFile.name}]\n\n${extractedText}`,
-        }
-      } catch (err) {
-        alert(`PDF extraction error: ${err instanceof Error ? err.message : String(err)}`)
-        setExtractingPdf(false)
-        return
-      }
-      setExtractingPdf(false)
-    }
-
     const userMsg: UIMessage = {
       id: crypto.randomUUID(),
       role: 'user',
       content: text,
-      attachedFile: resolvedFile ?? undefined,
+      attachedFile: attachedFile ?? undefined,
     }
     const newMessages = [...messages, userMsg]
     setMessages(newMessages)
@@ -681,7 +670,7 @@ export default function ChatPage() {
             disabled={(!input.trim() && !attachedFile) || loading || extractingPdf}
             className="w-10 h-10 rounded-full bg-brand flex items-center justify-center text-white disabled:opacity-40 transition-opacity shrink-0"
           >
-            {loading || extractingPdf ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
           </button>
         </div>
         <p className="text-xs text-[var(--text-tertiary)] text-center mt-2">
